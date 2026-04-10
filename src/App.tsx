@@ -54,6 +54,21 @@ interface Message {
   created_at: string;
 }
 
+// --- UTILS ---
+async function safeFetchJson(url: string, options?: RequestInit) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.indexOf("application/json") !== -1) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+    return data;
+  } else {
+    const text = await res.text();
+    console.error(`safeFetchJson: Expected JSON from ${url} but got:`, text);
+    throw new Error("Le serveur a renvoyé une réponse invalide.");
+  }
+}
+
 // --- MAIN APP ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -65,6 +80,7 @@ export default function App() {
   };
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [chatUser, setChatUser] = useState<User | null>(null);
   const [userPostsCount, setUserPostsCount] = useState(0);
@@ -91,13 +107,12 @@ export default function App() {
     const id = userId || user?.id;
     if (!token || !id) return;
     try {
-      const res = await fetch(`/api/users/${id}/stats`);
-      const data = await res.json();
+      const data = await safeFetchJson(`/api/users/${id}/stats`);
       setUserPostsCount(data.posts);
       setUserLikesCount(data.likes);
       setUserCommentsCount(data.comments);
     } catch (e) {
-      console.error(e);
+      console.error("fetchUserStats error:", e);
     }
   };
 
@@ -109,6 +124,9 @@ export default function App() {
     setUser(null);
     handleSetView('feed');
   };
+
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
 
   return (
     <div className="min-h-screen zellige-pattern text-[#1a1a1a] font-sans">
@@ -190,7 +208,14 @@ export default function App() {
         {view === 'feed' && (
           <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-8">
             <aside className="hidden lg:block space-y-6">
-              <ProfileCard user={user} setView={handleSetView} />
+              <ProfileCard 
+                user={user} 
+                setView={handleSetView} 
+                onJoin={(mode) => {
+                  setAuthModalMode(mode);
+                  setIsAuthModalOpen(true);
+                }}
+              />
               <StatsCard postsCount={userPostsCount} likesCount={userLikesCount} commentsCount={userCommentsCount} />
               <div className="moroccan-card p-6 bg-gradient-to-br from-[#006233] to-[#004d28] text-white relative overflow-hidden">
                 <div className="relative z-10">
@@ -228,6 +253,7 @@ export default function App() {
               )}
               <Feed 
                 user={user} 
+                refreshTrigger={refreshTrigger}
                 onMessage={(u) => setChatUser(u)} 
                 onCommentAdded={() => fetchUserStats()} 
                 onRegister={(schoolName) => {
@@ -280,12 +306,13 @@ export default function App() {
         )}
         {isAuthModalOpen && (
           <AuthModal 
+            initialMode={authModalMode}
             onClose={() => setIsAuthModalOpen(false)} 
             onSuccess={(u, t) => {
-              setUser(u);
               setToken(t);
+              setUser(u);
               setIsAuthModalOpen(false);
-              window.location.reload();
+              // Removed window.location.reload() for better performance
             }} 
           />
         )}
@@ -297,7 +324,8 @@ export default function App() {
             onSuccess={() => {
               setIsPostModalOpen(false);
               fetchUserStats();
-              window.location.reload();
+              triggerRefresh();
+              // Removed window.location.reload() for better performance
             }}
           />
         )}
@@ -354,18 +382,26 @@ function NavItem({ icon, label, active, onClick }: { icon: any, label: string, a
   );
 }
 
-function ProfileCard({ user, setView }: { user: User | null, setView: (v: 'feed' | 'profile' | 'auth') => void }) {
+function ProfileCard({ user, setView, onJoin }: { user: User | null, setView: (v: 'feed' | 'profile' | 'auth') => void, onJoin?: (mode: 'login' | 'signup') => void }) {
   if (!user) return (
     <div className="moroccan-card p-8 text-center bg-white relative overflow-hidden">
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#006233] via-[#d4af37] to-[#c1272d]" />
-      <h3 className="font-black text-[#006233] mb-3">Marhaban Bikom!</h3>
-      <p className="text-xs text-[#666] mb-6 leading-relaxed">Rejoignez la plus grande communauté d'étudiants au Maroc.</p>
-      <button 
-        onClick={() => setView('auth')}
-        className="btn-morocco-primary w-full text-xs active:scale-95 transition-all"
-      >
-        Rejoindre maintenant
-      </button>
+      <h1 className="font-black text-[#006233] mb-4 text-4xl md:text-5xl leading-tight">Marhba Bik!</h1>
+      <p className="text-sm text-[#666] mb-8 leading-relaxed font-medium">Rejoignez la plus grande communauté d'étudiants au Maroc.</p>
+      <div className="flex flex-col gap-3">
+        <button 
+          onClick={() => onJoin?.('signup')}
+          className="btn-morocco-primary w-full py-4 text-sm active:scale-95 transition-all shadow-lg shadow-[#006233]/20"
+        >
+          S'inscrire maintenant
+        </button>
+        <button 
+          onClick={() => onJoin?.('login')}
+          className="w-full py-3 text-xs font-bold text-[#666] hover:text-[#006233] transition-colors"
+        >
+          Déjà un compte ? Se connecter
+        </button>
+      </div>
     </div>
   );
 
@@ -669,13 +705,10 @@ function SchoolsCard({ user, onRegister }: { user: User | null, onRegister?: (na
 
   const fetchFollowedSchools = async () => {
     try {
-      const res = await fetch('/api/schools/followed', {
+      const data = await safeFetchJson('/api/schools/followed', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setFollowed(data);
-      }
+      setFollowed(data);
     } catch (e) {
       console.error(e);
     }
@@ -684,16 +717,13 @@ function SchoolsCard({ user, onRegister }: { user: User | null, onRegister?: (na
   const toggleFollow = async (schoolName: string) => {
     if (!user) return;
     try {
-      const res = await fetch(`/api/schools/${encodeURIComponent(schoolName)}/toggle-follow`, {
+      const data = await safeFetchJson(`/api/schools/${encodeURIComponent(schoolName)}/toggle-follow`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setFollowed(prev => 
-          data.followed ? [...prev, schoolName] : prev.filter(s => s !== schoolName)
-        );
-      }
+      setFollowed(prev => 
+        data.followed ? [...prev, schoolName] : prev.filter(s => s !== schoolName)
+      );
     } catch (e) {
       console.error(e);
     }
@@ -772,34 +802,49 @@ function SchoolsCard({ user, onRegister }: { user: User | null, onRegister?: (na
   );
 }
 
-function Feed({ user, onMessage, onCommentAdded, onRegister }: { user: User | null, onMessage: (u: User) => void, onCommentAdded?: () => void, onRegister?: (name: string) => void }) {
+function Feed({ user, refreshTrigger, onMessage, onCommentAdded, onRegister }: { user: User | null, refreshTrigger?: number, onMessage: (u: User) => void, onCommentAdded?: () => void, onRegister?: (name: string) => void }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    fetchPosts();
-  }, []);
+    fetchPosts(posts.length === 0);
+  }, [user, refreshTrigger]);
 
-  const fetchPosts = async () => {
+  const fetchPosts = async (isInitial: boolean) => {
+    if (isInitial) setLoading(true);
+    else setRefreshing(true);
+    
     try {
-      const res = await fetch('/api/posts', {
+      const data = await safeFetchJson('/api/posts', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
-      const data = await res.json();
       setPosts(data);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  if (loading) return <div className="text-center py-10 text-[#666]">Chargement du fil d'actualité...</div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-4">
+      <RefreshCw className="animate-spin text-[#006233]" size={32} />
+      <p className="text-sm font-bold text-[#666]">Chargement du fil d'actualité...</p>
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative">
+      {refreshing && (
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white px-4 py-2 rounded-full shadow-lg border border-[#006233]/10 flex items-center gap-2 z-20">
+          <RefreshCw className="animate-spin text-[#006233]" size={14} />
+          <span className="text-[10px] font-black text-[#006233] uppercase">Mise à jour...</span>
+        </div>
+      )}
       {posts.map(post => (
         <PostCard 
           key={post.id} 
@@ -836,11 +881,10 @@ function PostCard({ post, user, onMessage, onCommentAdded, onRegister }: PostCar
   const handleLike = async () => {
     if (!user) return;
     try {
-      const res = await fetch(`/api/posts/${post.id}/like`, {
+      const data = await safeFetchJson(`/api/posts/${post.id}/like`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
-      const data = await res.json();
       setLiked(data.liked);
       setLikesCount(prev => data.liked ? prev + 1 : prev - 1);
     } catch (e) {
@@ -851,8 +895,7 @@ function PostCard({ post, user, onMessage, onCommentAdded, onRegister }: PostCar
   const fetchComments = async () => {
     setLoadingComments(true);
     try {
-      const res = await fetch(`/api/posts/${post.id}/comments`);
-      const data = await res.json();
+      const data = await safeFetchJson(`/api/posts/${post.id}/comments`);
       setComments(data);
     } catch (e) {
       console.error(e);
@@ -865,7 +908,7 @@ function PostCard({ post, user, onMessage, onCommentAdded, onRegister }: PostCar
     e.preventDefault();
     if (!user || !commentContent.trim()) return;
     try {
-      const res = await fetch(`/api/posts/${post.id}/comments`, {
+      const data = await safeFetchJson(`/api/posts/${post.id}/comments`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -873,7 +916,6 @@ function PostCard({ post, user, onMessage, onCommentAdded, onRegister }: PostCar
         },
         body: JSON.stringify({ content: commentContent })
       });
-      const data = await res.json();
       setComments([...comments, data]);
       setCommentsCount(prev => prev + 1);
       setCommentContent('');
@@ -1033,16 +1075,16 @@ function PostCard({ post, user, onMessage, onCommentAdded, onRegister }: PostCar
   );
 }
 
-function AuthModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: (u: User, t: string) => void }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
+function AuthModal({ initialMode = 'login', onClose, onSuccess }: { initialMode?: 'login' | 'signup', onClose: () => void, onSuccess: (u: User, t: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
+  const [email, setEmail] = useState(localStorage.getItem('rememberedEmail') || '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'student' | 'eleve'>('student');
   const [institution, setInstitution] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isVerified, setIsVerified] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1051,16 +1093,17 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: (u:
 
     try {
       const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/signup';
-      console.log('Submitting to:', endpoint, { email, name, role, institution });
-      const res = await fetch(endpoint, {
+      const data = await safeFetchJson(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name, role, institution })
       });
-      const data = await res.json();
-      console.log('Response data:', data);
-
-      if (!res.ok) throw new Error(data.error);
+      
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
 
       if (mode === 'signup') {
         alert('Compte créé ! Veuillez vérifier votre email (voir console serveur pour le lien de simulation).');
@@ -1168,9 +1211,22 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: (u:
               />
             </div>
 
+            <div className="flex items-center gap-2 py-1">
+              <input 
+                type="checkbox" 
+                id="rememberMe"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border-[#dce6e9] text-[#006233] focus:ring-[#006233]"
+              />
+              <label htmlFor="rememberMe" className="text-xs font-bold text-[#666] cursor-pointer select-none">
+                Se souvenir de moi
+              </label>
+            </div>
+
             <button 
               disabled={loading}
-              className="w-full bg-[#006233] text-white py-3 rounded-full font-bold hover:bg-[#004d28] active:scale-[0.98] transition-all disabled:opacity-50 mt-4 shadow-lg shadow-[#006233]/20"
+              className="w-full bg-[#006233] text-white py-3 rounded-full font-bold hover:bg-[#004d28] active:scale-[0.98] transition-all disabled:opacity-50 mt-2 shadow-lg shadow-[#006233]/20"
             >
               {loading ? 'Chargement...' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
             </button>
@@ -1200,7 +1256,7 @@ function PostModal({ user, token, onClose, onSuccess }: { user: User, token: str
     if (!content) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/posts', {
+      await safeFetchJson('/api/posts', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -1208,9 +1264,7 @@ function PostModal({ user, token, onClose, onSuccess }: { user: User, token: str
         },
         body: JSON.stringify({ content, school })
       });
-      if (res.ok) {
-        onSuccess();
-      }
+      onSuccess();
     } catch (e) {
       console.error(e);
     } finally {
@@ -1286,7 +1340,7 @@ function RegistrationModal({ schoolName, user, onClose }: { schoolName: string, 
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('/api/registrations', {
+      await safeFetchJson('/api/registrations', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -1302,25 +1356,24 @@ function RegistrationModal({ schoolName, user, onClose }: { schoolName: string, 
           message
         })
       });
-      if (res.ok) {
-        setSuccess(true);
-        
-        // Prepare WhatsApp message
-        const whatsappNumber = "212709793474";
-        const text = `*Nouvelle Inscription - 3ALEM O T3ALEM*%0A%0A` +
-                     `*École:* ${schoolName}%0A` +
-                     `*Nom:* ${fullName}%0A` +
-                     `*Niveau:* ${level}%0A` +
-                     `*Moyenne:* ${average}%0A` +
-                     `*Téléphone:* ${phone}%0A` +
-                     `*Email:* ${email}%0A` +
-                     (message ? `*Message:* ${message}` : "");
-        
-        const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${text}`;
-        
-        // Open WhatsApp in a new tab
-        window.open(whatsappUrl, '_blank');
-      }
+      
+      setSuccess(true);
+      
+      // Prepare WhatsApp message
+      const whatsappNumber = "212709793474";
+      const text = `*Nouvelle Inscription - 3ALEM O T3ALEM*%0A%0A` +
+                   `*École:* ${schoolName}%0A` +
+                   `*Nom:* ${fullName}%0A` +
+                   `*Niveau:* ${level}%0A` +
+                   `*Moyenne:* ${average}%0A` +
+                   `*Téléphone:* ${phone}%0A` +
+                   `*Email:* ${email}%0A` +
+                   (message ? `*Message:* ${message}` : "");
+      
+      const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${text}`;
+      
+      // Open WhatsApp in a new tab
+      window.open(whatsappUrl, '_blank');
     } catch (e) {
       console.error(e);
     } finally {
@@ -1466,10 +1519,9 @@ function AdminRegistrations() {
 
   const fetchRegistrations = async () => {
     try {
-      const res = await fetch('/api/registrations', {
+      const data = await safeFetchJson('/api/registrations', {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
-      const data = await res.json();
       setRegistrations(data);
     } catch (e) {
       console.error(e);
@@ -1480,7 +1532,7 @@ function AdminRegistrations() {
 
   const updateStatus = async (id: number, status: string) => {
     try {
-      await fetch(`/api/registrations/${id}/status`, {
+      await safeFetchJson(`/api/registrations/${id}/status`, {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
@@ -1595,12 +1647,11 @@ function ProfilePage({ user, postsCount, likesCount, commentsCount, onEdit, onCo
 
   const fetchUserPosts = async () => {
     try {
-      const res = await fetch('/api/posts', {
+      const data = await safeFetchJson('/api/posts', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
-      const data = await res.json();
       const filtered = data.filter((p: any) => p.user_id === user.id);
       setUserPosts(filtered);
     } catch (e) {
@@ -1835,7 +1886,7 @@ function EditProfileModal({ user, onClose, onUpdate }: { user: User, onClose: ()
   const handleSave = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/profile', {
+      const data = await safeFetchJson('/api/auth/profile', {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -1843,12 +1894,7 @@ function EditProfileModal({ user, onClose, onUpdate }: { user: User, onClose: ()
         },
         body: JSON.stringify({ name, bio, institution, major, avatar_url: avatarUrl, banner_url: bannerUrl })
       });
-      const data = await res.json();
-      if (res.ok) {
-        onUpdate(data.user);
-      } else {
-        alert(data.error);
-      }
+      onUpdate(data.user);
     } catch (e) {
       console.error(e);
       alert('Erreur lors de la mise à jour du profil');

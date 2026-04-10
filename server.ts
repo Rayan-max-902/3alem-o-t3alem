@@ -157,7 +157,7 @@ async function startServer() {
   });
 
   // --- AUTH ROUTES ---
-  app.post('/api/auth/signup', async (req, res) => {
+  app.post('/api/auth/signup', async (req, res, next) => {
     const { email, password, name, role, institution } = req.body;
     console.log('Signup attempt:', { email, name, role, institution });
     
@@ -174,15 +174,11 @@ async function startServer() {
       console.log('User created successfully:', email);
       res.status(201).json({ message: 'Compte créé avec succès ! Vous pouvez maintenant vous connecter.', userId: result.lastInsertRowid });
     } catch (error: any) {
-      console.error('Signup error:', error);
-      if (error.message.includes('UNIQUE constraint failed')) {
-        return res.status(400).json({ error: 'Cet email est déjà utilisé' });
-      }
-      res.status(500).json({ error: 'Erreur lors de la création du compte' });
+      next(error);
     }
   });
 
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', async (req, res, next) => {
     const { email, password } = req.body;
     console.log('Login attempt for:', email);
     
@@ -226,8 +222,7 @@ async function startServer() {
         } 
       });
     } catch (error: any) {
-      console.error('Login error:', error);
-      res.status(500).json({ error: 'Erreur interne du serveur' });
+      next(error);
     }
   });
 
@@ -241,7 +236,7 @@ async function startServer() {
     res.json({ message: 'Email verified successfully' });
   });
 
-  app.put('/api/auth/profile', async (req, res) => {
+  app.put('/api/auth/profile', async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -258,8 +253,7 @@ async function startServer() {
       const updatedUser = db.prepare('SELECT id, name, email, role, institution, major, bio, avatar_url, banner_url FROM users WHERE id = ?').get(decoded.userId);
       res.json({ user: updatedUser });
     } catch (e) {
-      console.error('Profile update error:', e);
-      res.status(401).json({ error: 'Invalid token' });
+      next(e);
     }
   });
 
@@ -491,6 +485,12 @@ async function startServer() {
   // Catch-all for /api to prevent falling through to Vite/SPA
   app.all('/api/*', (req, res) => {
     res.status(404).json({ error: `Route ${req.method} ${req.url} not found` });
+  });
+
+  // Global error handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('Global Error Handler:', err);
+    res.status(500).json({ error: 'Internal Server Error', message: err.message });
   });
 
   // --- WEBSOCKETS ---
