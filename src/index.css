@@ -1,0 +1,40 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --primary: #006233;
+  --secondary: #c1272d;
+  --accent: #d4af37; /* Gold accent */
+  --bg-pattern: #fdfbf7;
+}
+
+body {
+  @apply antialiased bg-[#fdfbf7] text-[#1a1a1a];
+}
+
+/* Zellige Pattern Background */
+.zellige-pattern {
+  background-color: #fdfbf7;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0l15 15-15 15-15-15zM0 30l15 15-15 15L-15 45zM60 30l15 15-15 15-15-15zM30 60l15 15-15 15-15-15z' fill='%23006233' fill-opacity='0.03' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+
+.zellige-border {
+  border-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0z' fill='none'/%3E%3Cpath d='M20 0l5 15 15 5-15 5-5 15-5-15L0 20l15-5z' fill='%23c1272d' fill-opacity='0.1'/%3E%3C/svg%3E") 20 repeat;
+}
+
+.moroccan-card {
+  @apply bg-white rounded-2xl border border-[#e5e7eb] shadow-[0_4px_20px_-4px_rgba(0,98,51,0.1)] overflow-hidden;
+}
+
+.btn-morocco-primary {
+  @apply bg-[#006233] text-white px-6 py-2.5 rounded-xl font-bold hover:bg-[#004d28] transition-all shadow-lg shadow-[#006233]/20 active:scale-95;
+}
+
+.btn-morocco-secondary {
+  @apply bg-[#c1272d] text-white px-6 py-2.5 rounded-xl font-bold hover:bg-[#a02025] transition-all shadow-lg shadow-[#c1272d]/20 active:scale-95;
+}
